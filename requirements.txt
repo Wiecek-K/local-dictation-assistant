@@ -1,0 +1,18 @@
+# requirements.txt
+
+# Core speech-to-text engine
+faster-whisper
+
+# For GPU acceleration (Nvidia)
+# Note: CUDA Toolkit and cuDNN must be installed on the system
+ctranslate2
+
+# Audio recording
+sounddevice
+numpy
+
+# Global keyboard listener
+pynput
+
+# A library to handle clipboard easily
+pyperclip
