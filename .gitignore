@@ -210,3 +210,4 @@ __marimo__/
 
 # Folder for generated audio outputs
 /outputs/
+/testing_suite/test_outputs/
