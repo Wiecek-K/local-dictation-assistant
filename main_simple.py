@@ -1,3 +1,6 @@
+# main_simple.py
+# Wersja 3.1: Dodano obsługę automatycznego wykrywania języka.
+
 import os
 from datetime import datetime
 import configparser
@@ -30,7 +33,7 @@ DEESSER_ATTACK_MS = 10
 DEESSER_RELEASE_MS = 30
 FINAL_GAIN_DB = 6.0
 
-# --- Funkcje Przetwarzania i Aplikacji (bez zmian, z wyjątkiem logów w record_and_transcribe) ---
+# --- Funkcje Przetwarzania i Aplikacji (bez zmian, z wyjątkiem logiki języka w record_and_transcribe) ---
 def dynamic_de_esser_smooth(audio_segment, threshold_db, freq_start, freq_end, attenuation_db, attack_ms, release_ms):
     sibilance_band = audio_segment.high_pass_filter(freq_start).low_pass_filter(freq_end)
     chunk_length_ms = 10
@@ -153,17 +156,28 @@ def record_and_transcribe(settings):
     raw_audio_data = np.concatenate(audio_frames, axis=0).flatten().astype(np.float32)
     processed_audio = apply_preprocessing_pipeline(raw_audio_data)
     audio_duration_seconds = len(processed_audio) / SAMPLE_RATE
-    print("🧠 Rozpoczynanie transkrypcji...")
+    
+    # --- ZMIANA TUTAJ: Logika wyboru języka ---
+    lang_setting = settings['language']
+    language_for_model = None if lang_setting.lower() == 'auto' else lang_setting
+    
+    if language_for_model is None:
+        print("🧠 Rozpoczynanie transkrypcji (z automatycznym wykrywaniem języka)...")
+    else:
+        print(f"🧠 Rozpoczynanie transkrypcji (język: {language_for_model})...")
+        
     print(f"   -> Długość audio do transkrypcji: {audio_duration_seconds:.2f}s")
     
-    # --- ZMIANA TUTAJ: Poprawiona logika pomiaru czasu ---
     transcription_start_time = time.time()
-    segments_generator, _ = model.transcribe(
-        processed_audio, language=settings['language'], beam_size=5
+    segments_generator, info = model.transcribe(
+        processed_audio, language=language_for_model, beam_size=5
     )
-    # Wymuś wykonanie generatora i złączenie wyników
+    
+    if language_for_model is None:
+        print(f"   -> Wykryto język: {info.language} (prawdopodobieństwo: {info.language_probability:.2f})")
+
     final_text = "".join(segment.text for segment in segments_generator).strip()
-    transcription_end_time = time.time() # Zmierz czas DOPIERO po złączeniu wyników
+    transcription_end_time = time.time()
     
     transcription_duration = transcription_end_time - transcription_start_time
     
@@ -193,7 +207,7 @@ def record_and_transcribe(settings):
             print(f"🚀 Współczynnik RTF (Real-Time Factor): {rtf:.3f}")
             print(f"⏱️ Czas do transkrypcji (od puszczenia klawisza): {time_to_transcribe:.2f}s")
             print(f"📋 Czas kopiowania do schowka (pyperclip): {clipboard_duration:.2f}s")
-            print(f"⌨️ Czas samego wklejania (xdotool + sleep): {pasting_duration:.2f}s")
+            print(f"⌨️ Czas samego wklejenia (xdotool + sleep): {pasting_duration:.2f}s")
             print(f"⏱️ Czas do wklejenia (całkowity czas oczekiwania): {time_to_paste:.2f}s")
         except FileNotFoundError:
             print("❌ BŁĄD: Polecenie 'xdotool' nie zostało znalezione.")
