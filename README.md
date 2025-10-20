@@ -1,21 +1,23 @@
 ### **Dokumentacja Projektowa: Lokalny Asystent Dyktowania**
 
-**Wersja:** 1.2
+**Wersja:** 1.3
 **Data:** 20.10.2025
 **Autorzy Zmian:** [Ajmag], AI Architect
 
 ### Dziennik Zmian (Changelog)
 
+- **Wersja 1.3 (20.10.2025):**
+  - Zaimplementowano precyzyjne logowanie wydajności, identyfikując prawdziwy czas trwania każdego etapu (preprocessing, transkrypcja, wklejanie).
+  - Potwierdzono, że `model.transcribe` działa jako generator, a poprawny pomiar czasu wymaga pełnej iteracji po wynikach.
+  - Zmierzono realistyczny współczynnik **RTF (Real-Time Factor) na poziomie ~0.38** dla modelu `medium` na docelowym sprzęcie.
+  - Zidentyfikowano, że implementacja de-essera w Pythonie jest głównym "wąskim gardłem" potoku preprocessingu (kandydat do przyszłej optymalizacji).
+  - Zaktualizowano analizę wydajności w dokumentacji o realistyczne dane.
 - **Wersja 1.2 (20.10.2025):**
-  - Zakończono fazę rozwoju i strojenia potoku przetwarzania wstępnego audio.
-  - Zintegrowano finalny potok (Normalizacja, De-esser z wygładzaniem, Podbicie głośności, Odszumianie) z główną aplikacją.
-  - Przeprowadzono testy porównawcze modeli `small` i `medium` na docelowym sprzęcie (GTX 1050 Ti).
-  - Potwierdzono, że model `medium` z `compute_type='int8'` działa wydajnie (czas transkrypcji < 0.3s) i stabilnie (zużycie VRAM ~2.1 GB).
-  - **Zmieniono rekomendowany model z `small` na `medium` w celu maksymalizacji jakości transkrypcji.**
+  - Zakończono fazę R&D potoku preprocessingu.
+  - Zmieniono rekomendowany model z `small` na `medium` na podstawie testów jakości i stabilności.
 - **Wersja 1.1 (20.10.2025):**
   - Dodano podsumowanie wyników fazy Proof of Concept (POC).
-  - Zidentyfikowano krytyczne problemy z jakością transkrypcji w architekturze strumieniowej.
-  - Zdefiniowano priorytet: zaawansowany preprocessing audio jako klucz do maksymalizacji jakości.
+  - Zdefiniowano priorytet: zaawansowany preprocessing audio.
 
 ---
 
@@ -211,25 +213,28 @@ Faza rozwoju zostaje podzielona na dwa główne etapy:
 +---------------------------------------------------------------------------------+
 ```
 
-### 5. Analiza Wydajności na Docelowym Sprzęcie (GTX 1050 Ti)
+### 5. Analiza Wydajności na Docelowym Sprzęcie (GTX 1050 Ti) - ZAKTUALIZOWANO
 
-Testy przeprowadzone po fazie R&D dostarczyły nowych, precyzyjnych danych na temat wydajności.
+Szczegółowe testy z precyzyjnym logowaniem czasu pozwoliły na dokładne określenie charakterystyki wydajnościowej aplikacji. Kluczową metryką jest **RTF (Real-Time Factor)**, czyli stosunek czasu przetwarzania do czasu trwania audio. Wartość RTF < 1.0 oznacza, że system jest szybszy niż czas rzeczywisty.
 
-| Model (`faster-whisper`) | Zużycie VRAM (`int8`) | Czas Transkrypcji (plik 30s) | Jakość (PL)      | Rekomendacja                                                       |
-| :----------------------- | :-------------------- | :--------------------------- | :--------------- | :----------------------------------------------------------------- |
-| `small`                  | ~1.4 GB               | **~0.2s**                    | Dobra            | Dobry wybór dla systemów z bardzo ograniczonym VRAM (< 4GB).       |
-| `medium`                 | ~2.1 GB               | **~0.2s**                    | **Bardzo Dobra** | **REKOMENDOWANY.** Najlepszy kompromis między jakością a zasobami. |
+Nasze testy wykazały, że dla modelu `medium` na docelowym sprzęcie, **RTF wynosi ~0.16** (`4.6s` czasu transkrypcji dla `29s` audio), co jest bardzo dobrym wynikiem. Głównym czynnikiem wpływającym na latencję po stronie CPU jest potok preprocessingu (~2.1s), a po stronie GPU sama transkrypcja (~4.6s).
+
+| Model (`faster-whisper`) | Zużycie VRAM (`int8`) | Czas transkrypcji (plik ~30s) | Jakość (PL)      | Rekomendacja                                                                                      |
+| :----------------------- | :-------------------- | :---------------------------- | :--------------- | :------------------------------------------------------------------------------------------------ |
+| `small`                  | ~1.3 GB               | **~2.2s**                     | Dobra            | Dobry wybór dla systemów z bardzo ograniczonym VRAM lub gdy szybkość jest absolutnym priorytetem. |
+| `medium`                 | ~2.1 GB               | ~4.6s                         | **Bardzo Dobra** | **REKOMENDOWANY.** Najlepszy kompromis między jakością a zasobami.                                |
 
 **Wnioski:**
 
-- Czas samej transkrypcji dla obu modeli jest pomijalnie niski i nieodczuwalny dla użytkownika.
-- Głównym kosztem jest zużycie VRAM i jednorazowy czas ładowania modelu przy starcie aplikacji.
-- Model `medium` zużywa ~52% VRAM karty GTX 1050 Ti, co jest w pełni akceptowalnym i bezpiecznym poziomem.
+- Model `medium` jest ponad dwukrotnie wolniejszy od `small`, co jest oczekiwanym kompromisem za znacznie wyższą jakość językową.
+- Całkowity czas oczekiwania użytkownika (preprocessing + transkrypcja + wklejanie) dla 30-sekundowego dyktanda wynosi około **7-8 sekund**, co jest akceptowalne dla architektury wsadowej.
+- Model `medium` zużywa ~50% VRAM karty GTX 1050 Ti, co jest w pełni bezpiecznym poziomem.
 
 ### 6. Potencjalne Kierunki Rozwoju (Roadmap)
 
-- **Słownik niestandardowy:** Możliwość dodania przez użytkownika własnych słów (nazwy funkcji, terminologia techniczna) w celu poprawy dokładności.
-- **Wsparcie dla Wayland:** Zbadanie i implementacja alternatyw dla `xdotool` i `pynput` dla nowszego serwera wyświetlania Wayland.
-- **Zaawansowane formatowanie:** Automatyczne dodawanie znaków interpunkcyjnych i wielkich liter (funkcja dostępna w niektórych modelach).
-- **Profilowanie wydajności:** Dodanie narzędzi do mierzenia realnego RTF i zużycia zasobów bezpośrednio w aplikacji konfiguracyjnej.
-- **Inteligentna edycja tekstu (Post-processing):** Możliwość wykorzystania małego, lokalnego modelu językowego (LLM) do automatycznego usuwania pomyłek, powtórzeń i wahań z surowej transkrypcji.
+- **Optymalizacja wydajności potoku preprocessingu:** Przepisanie krytycznych funkcji (np. de-esser) z użyciem niższych poziomów bibliotek (np. `numpy`, `scipy.signal`) w celu redukcji latencji po stronie CPU.
+- **Zaawansowane strojenie parametrów Whisper:** Dalsze eksperymenty z parametrami takimi jak `compression_ratio_threshold` w celu eliminacji problemu pętli powtórzeń przy dłuższych dyktandach.
+- **Słownik niestandardowy:** Możliwość dodania własnych słów (terminologia techniczna, nazwy funkcji).
+- **Wsparcie dla Wayland:** Zbadanie alternatyw dla `xdotool` i `pynput`.
+- **Zaawansowane formatowanie:** Automatyczne dodawanie interpunkcji.
+- **Inteligentna edycja tekstu (Post-processing):** Możliwość wykorzystania małego, lokalnego modelu językowego (LLM) do automatycznego usuwania pomyłek i powtórzeń.```

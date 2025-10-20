@@ -1,5 +1,6 @@
 # /testing_suite/run_comparison_test.py
-# Wersja 4: Dodano logowanie zużycia VRAM po załadowaniu każdego modelu.
+# Wersja 6: Poprawiono logikę, aby jawnie ładować modele 'small' i 'medium',
+# niezależnie od ustawień w config.ini.
 
 import sys
 import time
@@ -21,18 +22,11 @@ RAW_AUDIO_PATH = os.path.join(PARENT_DIR, 'sibilants_test.wav')
 PROCESSED_AUDIO_PATH = os.path.join(PARENT_DIR, 'test_outputs', 'sibilants_test_processed.wav')
 
 def get_gpu_usage():
-    """Zwraca informacje o zużyciu VRAM, jeśli nvsmi jest dostępne."""
-    if not nvsmi:
-        return "N/A (biblioteka nvsmi nie jest zainstalowana)"
+    if not nvsmi: return "N/A"
     try:
-        gpus = list(nvsmi.get_gpus())
-        if not gpus:
-            return "Nie znaleziono karty NVIDIA."
-        # Zakładamy, że interesuje nas pierwsza karta
-        gpu = gpus[0]
+        gpu = list(nvsmi.get_gpus())[0]
         return f"{gpu.mem_util}% ({gpu.mem_used}MB / {gpu.mem_total}MB)"
-    except Exception as e:
-        return f"Błąd odczytu informacji o GPU: {e}"
+    except Exception: return "Błąd odczytu GPU"
 
 def load_configuration(override_model_path=None):
     config = configparser.ConfigParser()
@@ -72,9 +66,9 @@ def transcribe_audio(model, file_path, language):
     try:
         audio_data, sr = librosa.load(file_path, sr=16000, mono=True)
         start_time = time.time()
-        segments, _ = model.transcribe(audio_data, language=language, beam_size=5)
+        segments_generator, _ = model.transcribe(audio_data, language=language, beam_size=5)
+        text_result = "".join(segment.text for segment in segments_generator).strip()
         duration = time.time() - start_time
-        text_result = "".join(segment.text for segment in segments).strip()
         print(f"   -> Zakończono w {duration:.2f}s.")
         return text_result, duration
     except Exception as e:
@@ -85,10 +79,10 @@ def transcribe_audio(model, file_path, language):
 def main():
     print("--- Uruchamianie Pełnego Testu Porównawczego Transkrypcji ---")
     results = {}
-
     print(f"Początkowe zużycie VRAM: {get_gpu_usage()}")
 
-    settings_small = load_configuration()
+    # --- Test 1: Model 'small' (wymuszony) ---
+    settings_small = load_configuration(override_model_path="small")
     model_small = load_model(settings_small)
     if model_small:
         text, duration = transcribe_audio(model_small, RAW_AUDIO_PATH, settings_small['language'])
@@ -96,9 +90,9 @@ def main():
         text, duration = transcribe_audio(model_small, PROCESSED_AUDIO_PATH, settings_small['language'])
         results['processed_small'] = {'text': text, 'time': duration}
         del model_small
-        print("   -> Model 'small' zwolniony z pamięci.")
-        print(f"   -> Zużycie VRAM po zwolnieniu: {get_gpu_usage()}")
+        print(f"   -> Zużycie VRAM po zwolnieniu 'small': {get_gpu_usage()}")
 
+    # --- Test 2: Model 'medium' (wymuszony) ---
     settings_medium = load_configuration(override_model_path="medium")
     model_medium = load_model(settings_medium)
     if model_medium:
@@ -107,8 +101,7 @@ def main():
         text, duration = transcribe_audio(model_medium, PROCESSED_AUDIO_PATH, settings_medium['language'])
         results['processed_medium'] = {'text': text, 'time': duration}
         del model_medium
-        print("   -> Model 'medium' zwolniony z pamięci.")
-        print(f"   -> Zużycie VRAM po zwolnieniu: {get_gpu_usage()}")
+        print(f"   -> Zużycie VRAM po zwolnieniu 'medium': {get_gpu_usage()}")
 
     # --- Podsumowanie Wyników ---
     print("\n\n" + "="*80)
