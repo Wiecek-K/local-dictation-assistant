@@ -8,6 +8,7 @@ import configparser
 import sys
 import time
 import numpy as np
+import noisereduce as nr
 import sounddevice as sd
 import pyperclip
 import subprocess
@@ -58,6 +59,7 @@ def load_model(settings):
         print(f"❌ Critical Error: Failed to load the Whisper model: {e}")
         sys.exit(1)
 
+
 def record_and_transcribe(settings):
     global audio_frames
     SAMPLE_RATE = 16000
@@ -86,17 +88,29 @@ def record_and_transcribe(settings):
 
     audio_data = np.concatenate(audio_frames, axis=0).flatten().astype(np.float32)
 
+    # --- NEW: Audio Preprocessing (Noise Reduction) ---
+    try:
+        print("🔊 Applying noise reduction...")
+        # We assume the first 0.5 seconds of the recording is noise
+        # This is a simple but effective approach for this POC
+        noise_clip = audio_data[:int(SAMPLE_RATE * 0.5)]
+        reduced_noise_audio = nr.reduce_noise(y=audio_data, y_noise=noise_clip, sr=SAMPLE_RATE)
+        print("🔊 Noise reduction complete.")
+        # Use the cleaned audio for transcription and saving
+        audio_to_process = reduced_noise_audio
+    except Exception as e:
+        print(f"⚠️ Warning: Noise reduction failed: {e}. Using original audio.")
+        audio_to_process = audio_data
+
     # --- Save to File Logic ---
     output_dir = "outputs"
     os.makedirs(output_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    
-    # Generate filenames for both wav and txt
     wav_filename = os.path.join(output_dir, f"recording_{timestamp}.wav")
     txt_filename = os.path.join(output_dir, f"recording_{timestamp}.txt")
 
     try:
-        audio_data_int16 = np.int16(audio_data * 32767)
+        audio_data_int16 = np.int16(audio_to_process * 32767)
         write(wav_filename, SAMPLE_RATE, audio_data_int16)
         print(f"✅ Audio saved to {wav_filename}")
     except Exception as e:
@@ -107,9 +121,13 @@ def record_and_transcribe(settings):
     start_time = time.time()
     
     segments, _ = model.transcribe(
-        audio_data,
+        audio_to_process, # Use the cleaned audio
         language=settings['language'],
-        beam_size=5
+        beam_size=5,
+        temperature=0.0,
+        compression_ratio_threshold=2.4,
+        log_prob_threshold=-1.0,
+        no_speech_threshold=0.6
     )
     
     end_time = time.time()
@@ -118,7 +136,6 @@ def record_and_transcribe(settings):
     
     print(f"🧠 Transcription finished in {end_time - start_time:.2f} seconds.")
     
-    # --- NEW: Save transcript to .txt file ---
     try:
         with open(txt_filename, "w", encoding="utf-8") as f:
             f.write(final_text)
@@ -138,6 +155,7 @@ def record_and_transcribe(settings):
             print("✅ Pasted into active window.")
         except Exception as e:
             print(f"❌ Error during pasting: {e}")
+
 
 def start_recording_flag():
     global is_recording
