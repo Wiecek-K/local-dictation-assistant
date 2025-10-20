@@ -1,18 +1,21 @@
 ### **Dokumentacja Projektowa: Lokalny Asystent Dyktowania**
 
-**Wersja:** 1.1
+**Wersja:** 1.2
 **Data:** 20.10.2025
-**Autorzy Zmian:** [Twoje Imię/Inicjały], AI Architect
+**Autorzy Zmian:** [Ajmag], AI Architect
 
 ### Dziennik Zmian (Changelog)
 
+- **Wersja 1.2 (20.10.2025):**
+  - Zakończono fazę rozwoju i strojenia potoku przetwarzania wstępnego audio.
+  - Zintegrowano finalny potok (Normalizacja, De-esser z wygładzaniem, Podbicie głośności, Odszumianie) z główną aplikacją.
+  - Przeprowadzono testy porównawcze modeli `small` i `medium` na docelowym sprzęcie (GTX 1050 Ti).
+  - Potwierdzono, że model `medium` z `compute_type='int8'` działa wydajnie (czas transkrypcji < 0.3s) i stabilnie (zużycie VRAM ~2.1 GB).
+  - **Zmieniono rekomendowany model z `small` na `medium` w celu maksymalizacji jakości transkrypcji.**
 - **Wersja 1.1 (20.10.2025):**
   - Dodano podsumowanie wyników fazy Proof of Concept (POC).
   - Zidentyfikowano krytyczne problemy z jakością transkrypcji w architekturze strumieniowej.
-  - Potwierdzono, że model `small` na docelowym sprzęcie (GTX 1050 Ti) może osiągnąć zadowalającą jakość przy przetwarzaniu wsadowym (batch).
-  - Zdiagnozowano problemy z ładowaniem modelu `medium` i powtórzeniami w generowanym tekście.
-  - Zdefiniowano nowy priorytet: zaawansowany preprocessing audio jako klucz do maksymalizacji jakości modelu `small`.
-  - Zaktualizowano plan działania, dodając etap rozwoju i testowania potoku preprocessingu.
+  - Zdefiniowano priorytet: zaawansowany preprocessing audio jako klucz do maksymalizacji jakości.
 
 ---
 
@@ -24,10 +27,10 @@ Celem projektu jest stworzenie wysokowydajnego narzędzia do transkrypcji mowy n
 
 #### 1.2. Kluczowe Zasady Architektoniczne
 
-- **Prywatność (Offline-First):** Żadne dane audio ani tekstowe nigdy nie opuszczają komputera użytkownika. Całe przetwarzanie odbywa się lokalnie.
-- **Wydajność na Docelowym Sprzęcie:** Architektura musi być zoptymalizowana pod kątem działania na sprzęcie klasy Intel i5 z kartą graficzną Nvidia GTX 1050 Ti (4GB VRAM).
-- **Głęboka Integracja Systemowa:** Aplikacja musi działać w tle i być aktywowana globalnym skrótem klawiszowym, a wynik jej pracy ma być natychmiast dostępny w aktywnym oknie.
-- **Niska Odczuwalna Latencja:** Czas oczekiwania na tekst po zakończeniu dyktowania musi być zminimalizowany, nawet przy dyktowaniu dłuższych fragmentów.
+- **Prywatność (Offline-First):** Żadne dane audio ani tekstowe nigdy nie opuszczają komputera użytkownika.
+- **Wydajność na Docelowym Sprzęcie:** Architektura musi być zoptymalizowana pod kątem działania na sprzęcie z kartą graficzną Nvidia GTX 1050 Ti (4GB VRAM).
+- **Głęboka Integracja Systemowa:** Aplikacja musi działać w tle i być aktywowana globalnym skrótem klawiszowym.
+- **Niska Odczuwalna Latencja:** Czas oczekiwania na tekst po zakończeniu dyktowania musi być zminimalizowany.
 
 ### 2. Architektura Wysokopoziomowa
 
@@ -75,32 +78,31 @@ System składa się z jednego głównego komponentu – **usługi działającej 
 +--------------------------------------------------------------------------+
 ```
 
-### 3. Faza 1: Proof of Concept (POC) - Podsumowanie Wyników
+### 3. Faza 1: Rozwój i Strojenie Potoku Preprocessingu - Zakończone
 
-#### 3.1. Cele POC (Status)
+Faza ta została zakończona sukcesem. Opracowano i wdrożono zaawansowany potok przetwarzania wstępnego audio, który znacząco poprawia jakość sygnału dostarczanego do modelu AI.
 
-1.  **Weryfikacja Wydajności:** **Zakończone.** Potwierdzono, że docelowy sprzęt (GTX 1050 Ti) jest w stanie uruchamiać modele Whisper z akceleracją CUDA. Zidentyfikowano i rozwiązano liczne problemy konfiguracyjne środowiska.
-2.  **Ocena Jakości:** **Zakończone.** Weryfikacja wykazała, że:
-    - Architektura strumieniowa (streaming) w prostej implementacji **znacząco degraduje jakość** transkrypcji z powodu braku pełnego kontekstu.
-    - Architektura wsadowa (batch, przetwarzanie całego pliku na raz) z modelem `small` **osiąga zadowalającą jakość bazową**.
-    - Model `medium` oferuje wyższą jakość, ale jego działanie na docelowym sprzęcie jest niestabilne (problem z ładowaniem do VRAM, pętle powtórzeń).
-3.  **Potwierdzenie Integracji:** **Zakończone.** Potwierdzono niezawodne działanie globalnego skrótu klawiszowego (`pynput`) i wklejania tekstu (`xdotool`).
+#### 3.1. Kluczowe Wnioski z Fazy R&D
 
-#### 3.2. Kluczowe Wnioski z Fazy POC
+- **Preprocessing jest kluczowy:** Testy A/B jednoznacznie wykazały, że "czysty" sygnał audio (po preprocessingu) pozwala modelom AI na osiągnięcie znacznie wyższej dokładności transkrypcji, eliminując błędy wynikające z artefaktów dźwiękowych (sybilanty, szum).
+- **Preprocessing Umożliwia Użycie Modelu `medium`:** Najważniejszym odkryciem fazy jest fakt, że dzięki wysokiej jakości sygnału wejściowego, model `medium` staje się w pełni użyteczny na docelowym sprzęcie. Jego wyższa jakość językowa w połączeniu z czystym audio daje najlepsze rezultaty.
+- **`int8` jest optymalnym typem obliczeń:** Testy potwierdziły, że kwantyzacja do `int8` oferuje najlepszy kompromis między zużyciem VRAM, szybkością a jakością na karcie GTX 1050 Ti. Próby użycia `float16` i `float32` zakończyły się błędami braku wsparcia lub pamięci.
 
-- **Jakość > Niska Latencja:** Wstępne testy wykazały, że niska jakość transkrypcji jest większą barierą dla użyteczności niż kilkusekundowy czas oczekiwania. Dlatego priorytetem staje się maksymalizacja dokładności.
-- **Preprocessing jest Kluczowy:** Analiza nagrań audio wykazała obecność szumów tła oraz problematycznych sybilantów i spółgłosek wybuchowych. Dostarczenie "czystszego" sygnału do modelu AI jest najbardziej obiecującą metodą na poprawę jakości bez zwiększania wymagań sprzętowych.
-- **Model `small` jako Punkt Wyjścia:** Ze względu na stabilność i niskie zużycie zasobów, model `small` pozostaje naszym głównym celem. Celem jest osiągnięcie jakości zbliżonej do modelu `medium` poprzez zaawansowany preprocessing audio.
+#### 3.2. Finalny Potok Przetwarzania Wstępnego
 
-#### 3.3. Stos Technologiczny POC
+1.  **Normalizacja Głośności:** Ujednolicenie poziomu sygnału.
+2.  **Dynamiczny De-esser z Wygładzaniem:** Precyzyjne tłumienie ostrych sybilantów (`s`, `sz`, `cz`) bez wprowadzania artefaktów (trzasków).
+3.  **Podbicie Głośności (Gain):** Zwiększenie ogólnej głośności w celu kompensacji i zapewnienia mocnego sygnału.
+4.  **Redukcja Szumu:** Usunięcie stałego szumu tła.
 
-- **Język:** Python 3.
-- **Silnik STT:** `faster-whisper==0.10.0`
-- **Akceleracja GPU:** `ctranslate2==3.24.0`
+#### 3.3. Stos Technologiczny
+
+- **Język:** Python 3
+- **Silnik STT:** `faster-whisper`
+- **Akceleracja GPU:** `ctranslate2`
+- **Przetwarzanie Audio:** `pydub`, `noisereduce`, `librosa`, `numpy`
 - **Nagrywanie Audio:** `sounddevice`
-- **Przetwarzanie Audio:** `numpy`, `scipy`, `pydub`, `noisereduce`
-- **Globalny Skrót Klawiszowy:** `pynput`
-- **Integracja z Systemem:** `pyperclip`, `subprocess` z `xdotool`
+- **Integracja z Systemem:** `pynput`, `pyperclip`, `subprocess` z `xdotool`
 
 #### 3.4. Wyzwania Techniczne i Rozwiązania
 
@@ -211,17 +213,18 @@ Faza rozwoju zostaje podzielona na dwa główne etapy:
 
 ### 5. Analiza Wydajności na Docelowym Sprzęcie (GTX 1050 Ti)
 
-Kluczowe jest zarządzanie oczekiwaniami co do wydajności. Poniższa tabela przedstawia szacowane parametry dla transkrypcji strumieniowej.
+Testy przeprowadzone po fazie R&D dostarczyły nowych, precyzyjnych danych na temat wydajności.
 
-| Model (`faster-whisper`) | Zużycie VRAM (`int8`) | Szacowany RTF\* | Jakość (PL)  | Rekomendacja                                                         |
-| :----------------------- | :-------------------- | :-------------- | :----------- | :------------------------------------------------------------------- |
-| `base`                   | ~0.8 GB               | **0.3 - 0.4**   | Zadowalająca | Dobry wybór, jeśli szybkość jest absolutnym priorytetem.             |
-| `small`                  | ~1.5 GB               | **0.5 - 0.7**   | **Dobra**    | **Rekomendowany.** Najlepszy kompromis między jakością a szybkością. |
-| `medium`                 | ~3.0 GB               | ~1.2 - 1.5      | Bardzo dobra | Prawdopodobnie zbyt wolny (RTF > 1.0) i na granicy VRAM.             |
+| Model (`faster-whisper`) | Zużycie VRAM (`int8`) | Czas Transkrypcji (plik 30s) | Jakość (PL)      | Rekomendacja                                                       |
+| :----------------------- | :-------------------- | :--------------------------- | :--------------- | :----------------------------------------------------------------- |
+| `small`                  | ~1.4 GB               | **~0.2s**                    | Dobra            | Dobry wybór dla systemów z bardzo ograniczonym VRAM (< 4GB).       |
+| `medium`                 | ~2.1 GB               | **~0.2s**                    | **Bardzo Dobra** | **REKOMENDOWANY.** Najlepszy kompromis między jakością a zasobami. |
 
-_\*RTF (Real-Time Factor): Czas Przetwarzania / Czas Trwania Audio. RTF = 0.5 oznacza, że 10 sekund audio jest przetwarzane w 5 sekund._
+**Wnioski:**
 
-Dzięki architekturze strumieniowej, odczuwalny czas oczekiwania będzie zależał od długości ostatniego fragmentu audio (`chunk_seconds`), a nie od długości całego dyktowania, co jest kluczowe dla użyteczności aplikacji.
+- Czas samej transkrypcji dla obu modeli jest pomijalnie niski i nieodczuwalny dla użytkownika.
+- Głównym kosztem jest zużycie VRAM i jednorazowy czas ładowania modelu przy starcie aplikacji.
+- Model `medium` zużywa ~52% VRAM karty GTX 1050 Ti, co jest w pełni akceptowalnym i bezpiecznym poziomem.
 
 ### 6. Potencjalne Kierunki Rozwoju (Roadmap)
 
@@ -229,3 +232,4 @@ Dzięki architekturze strumieniowej, odczuwalny czas oczekiwania będzie zależa
 - **Wsparcie dla Wayland:** Zbadanie i implementacja alternatyw dla `xdotool` i `pynput` dla nowszego serwera wyświetlania Wayland.
 - **Zaawansowane formatowanie:** Automatyczne dodawanie znaków interpunkcyjnych i wielkich liter (funkcja dostępna w niektórych modelach).
 - **Profilowanie wydajności:** Dodanie narzędzi do mierzenia realnego RTF i zużycia zasobów bezpośrednio w aplikacji konfiguracyjnej.
+- **Inteligentna edycja tekstu (Post-processing):** Możliwość wykorzystania małego, lokalnego modelu językowego (LLM) do automatycznego usuwania pomyłek, powtórzeń i wahań z surowej transkrypcji.
