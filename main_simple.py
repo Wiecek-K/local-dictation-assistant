@@ -1,6 +1,5 @@
 # main_simple.py
-# A simplified version for quality verification.
-# Records a full audio clip, saves it to a file, and transcribes it in one go.
+# Wersja 2.0: Zintegrowany finalny, dopracowany potok przetwarzania wstępnego audio.
 
 import os
 from datetime import datetime
@@ -19,13 +18,101 @@ from pydub.effects import normalize
 from pynput import keyboard
 from scipy.io.wavfile import write
 
-# --- Global Variables ---
+# --- Globalne Zmienne ---
 model = None
 is_recording = False
 audio_frames = []
-app_settings = {} # To store settings globally for the hotkey thread
+app_settings = {}
 
-# --- Configuration Loading ---
+# --- Finalne Parametry Potoku (ustalone na podstawie testów) ---
+SAMPLE_RATE = 16000             # [Hz] Częstotliwość próbkowania; standard dla modeli mowy.
+DEESSER_THRESH_DB = -43         # [dB] Próg głośności, powyżej którego de-esser zaczyna tłumić syki.
+DEESSER_ATTENUATION_DB = 13     # [dB] Siła, z jaką de-esser ścisza wykryte sybilanty.
+DEESSER_FREQ_START = 6000       # [Hz] Dolna granica pasma częstotliwości, w którym działa de-esser.
+DEESSER_FREQ_END = 10000        # [Hz] Górna granica pasma częstotliwości, w którym działa de-esser.
+DEESSER_ATTACK_MS = 10          # [ms] Czas potrzebny na osiągnięcie pełnego tłumienia (wygładza początek).
+DEESSER_RELEASE_MS = 30         # [ms] Czas powrotu do normalnej głośności (wygładza koniec, eliminuje trzaski).
+FINAL_GAIN_DB = 6.0             # [dB] Końcowe podbicie głośności całego nagrania po przetworzeniu.
+# DEPLOSER_FREQ = 100           # [Hz] De-ploser obecnie nieużywany, ale parametr zostaje na przyszłość.
+
+# --- Funkcje Przetwarzania Wstępnego Audio ---
+
+def dynamic_de_esser_smooth(audio_segment, threshold_db, freq_start, freq_end, attenuation_db, attack_ms, release_ms):
+    """Ulepszony de-esser z wygładzaniem (attack/release) w celu uniknięcia trzasków."""
+    sibilance_band = audio_segment.high_pass_filter(freq_start).low_pass_filter(freq_end)
+    chunk_length_ms = 10
+    is_attenuating = False
+    processed_audio = AudioSegment.empty()
+    for i in range(0, len(audio_segment), chunk_length_ms):
+        chunk_original = audio_segment[i:i+chunk_length_ms]
+        chunk_sibilance = sibilance_band[i:i+chunk_length_ms]
+        should_attenuate = chunk_sibilance.dBFS > threshold_db
+        if should_attenuate and not is_attenuating:
+            chunk_attenuated = chunk_original - attenuation_db
+            transition = chunk_original.fade(to_gain=-120, start=0, duration=attack_ms).overlay(chunk_attenuated.fade(from_gain=-120, start=0, duration=attack_ms))
+            processed_audio += transition
+            is_attenuating = True
+        elif not should_attenuate and is_attenuating:
+            chunk_attenuated = chunk_original - attenuation_db
+            transition = chunk_attenuated.fade(to_gain=-120, start=0, duration=release_ms).overlay(chunk_original.fade(from_gain=-120, start=0, duration=release_ms))
+            processed_audio += transition
+            is_attenuating = False
+        elif is_attenuating:
+            processed_audio += (chunk_original - attenuation_db)
+        else:
+            processed_audio += chunk_original
+    return processed_audio
+
+def apply_preprocessing_pipeline(audio_data_float32):
+    """Stosuje pełny potok przetwarzania wstępnego do surowych danych audio."""
+    print("🔊 Uruchamianie potoku przetwarzania wstępnego audio...")
+    try:
+        audio_data_int16 = np.int16(audio_data_float32 * 32767)
+        audio_segment = AudioSegment(
+            audio_data_int16.tobytes(), 
+            frame_rate=SAMPLE_RATE,
+            sample_width=audio_data_int16.dtype.itemsize, 
+            channels=1
+        )
+        
+        print("   - Krok 1: Normalizacja głośności...")
+        normalized_segment = normalize(audio_segment)
+        
+        print(f"   - Krok 2: Aplikowanie de-essera z wygładzaniem...")
+        deessed_segment = dynamic_de_esser_smooth(
+            normalized_segment, 
+            DEESSER_THRESH_DB, 
+            DEESSER_FREQ_START, 
+            DEESSER_FREQ_END, 
+            DEESSER_ATTENUATION_DB, 
+            DEESSER_ATTACK_MS, 
+            DEESSER_RELEASE_MS
+        )
+        
+        print(f"   - Krok 3: Podbicie głośności o +{FINAL_GAIN_DB} dB...")
+        boosted_segment = deessed_segment + FINAL_GAIN_DB
+
+        processed_before_nr = np.array(boosted_segment.get_array_of_samples(), dtype=np.float32) / 32767.0
+        
+        print("   - Krok 4: Aplikowanie redukcji szumu...")
+        noise_clip = processed_before_nr[:int(SAMPLE_RATE * 0.5)]
+        final_audio_float32 = nr.reduce_noise(
+            y=processed_before_nr,
+            y_noise=noise_clip,
+            sr=SAMPLE_RATE,
+            prop_decrease=0.85
+        )
+        
+        print("🔊 Przetwarzanie wstępne zakończone pomyślnie.")
+        return final_audio_float32
+
+    except Exception as e:
+        print(f"⚠️ OSTRZEŻENIE: Przetwarzanie wstępne nie powiodło się: {e}.")
+        print("   Używanie oryginalnego, surowego audio.")
+        return audio_data_float32
+
+# --- Główne Funkcje Aplikacji (bez zmian) ---
+
 def load_configuration():
     config = configparser.ConfigParser()
     try:
@@ -37,117 +124,63 @@ def load_configuration():
             'hotkey': config.get('settings', 'hotkey', fallback='<ctrl>+f8'),
             'language': config.get('settings', 'language', fallback='pl'),
         }
-        print("Configuration loaded successfully.")
+        print("Konfiguracja załadowana pomyślnie.")
         return settings
     except (FileNotFoundError, configparser.Error) as e:
-        print(f"Error loading config.ini: {e}")
+        print(f"Błąd wczytywania config.ini: {e}")
         sys.exit(1)
 
-# --- Core Functions ---
 def load_model(settings):
     global model
     model_path = settings['model_path']
     device = settings['device']
     compute_type = settings['compute_type']
-    print("\n--- Model Loading ---")
-    print(f"Attempting to load model: '{model_path}'")
-    print(f"Device: '{device}', Compute Type: '{compute_type}'")
+    print("\n--- Ładowanie Modelu ---")
+    print(f"Próba załadowania modelu: '{model_path}'")
+    print(f"Urządzenie: '{device}', Typ obliczeń: '{compute_type}'")
     start_time = time.time()
     try:
         model = WhisperModel(model_path, device=device, compute_type=compute_type)
         end_time = time.time()
-        print(f"✅ Model loaded successfully in {end_time - start_time:.2f} seconds.")
+        print(f"✅ Model załadowany pomyślnie w {end_time - start_time:.2f}s.")
     except Exception as e:
-        print(f"❌ Critical Error: Failed to load the Whisper model: {e}")
+        print(f"❌ BŁĄD KRYTYCZNY: Nie udało się załadować modelu Whisper: {e}")
         sys.exit(1)
-
 
 def record_and_transcribe(settings):
     global audio_frames
-    SAMPLE_RATE = 16000
-    
-    print("🎙️  Recording... Speak now.")
-    
+    print("\n🎙️  Nagrywanie... Mów teraz.")
     audio_frames = []
     def audio_callback(indata, frames, time, status):
         if status:
-            print(f"Audio stream status: {status}", file=sys.stderr)
+            print(f"Status strumienia audio: {status}", file=sys.stderr)
         audio_frames.append(indata.copy())
-
     stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype='float32', callback=audio_callback)
     stream.start()
-    
     while is_recording:
         time.sleep(0.1)
-        
     stream.stop()
     stream.close()
-    print("🎙️  Recording stopped.")
-
+    print("🎙️  Nagrywanie zatrzymane.")
     if not audio_frames:
-        print("No audio recorded.")
+        print("Nie nagrano żadnego dźwięku.")
         return
-
-    audio_data = np.concatenate(audio_frames, axis=0).flatten().astype(np.float32)
-
-    # --- NEW: Advanced Audio Preprocessing Pipeline ---
-    try:
-        print("🔊 Starting audio preprocessing...")
-        
-        # Step 1: Convert numpy array to pydub AudioSegment for easy processing
-        # We need to convert float32 to int16 for pydub
-        audio_data_int16 = np.int16(audio_data * 32767)
-        audio_segment = AudioSegment(
-            audio_data_int16.tobytes(), 
-            frame_rate=SAMPLE_RATE,
-            sample_width=audio_data_int16.dtype.itemsize, 
-            channels=1
-        )
-        
-        # Step 2: Normalize volume to a target level (e.g., -20 dBFS)
-        print("   - Normalizing volume...")
-        normalized_segment = normalize(audio_segment, headroom=0.1)
-        
-        # Convert back to numpy array for noise reduction
-        normalized_audio_data = np.array(normalized_segment.get_array_of_samples()).astype(np.float32) / 32767.0
-        
-        # Step 3: Apply a gentler noise reduction
-        print("   - Applying noise reduction...")
-        noise_clip = normalized_audio_data[:int(SAMPLE_RATE * 0.5)]
-        reduced_noise_audio = nr.reduce_noise(
-            y=normalized_audio_data,
-            y_noise=noise_clip,
-            sr=SAMPLE_RATE,
-            prop_decrease=0.8  # Use 80% reduction instead of 100%
-        )
-        
-        print("🔊 Preprocessing complete.")
-        audio_to_process = reduced_noise_audio
-    except Exception as e:
-        print(f"⚠️ Warning: Preprocessing failed: {e}. Using original audio.")
-        audio_to_process = audio_data
-
-    # --- Save to File Logic ---
+    raw_audio_data = np.concatenate(audio_frames, axis=0).flatten().astype(np.float32)
+    processed_audio = apply_preprocessing_pipeline(raw_audio_data)
     output_dir = "outputs"
     os.makedirs(output_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    wav_filename = os.path.join(output_dir, f"recording_{timestamp}.wav")
-    txt_filename = os.path.join(output_dir, f"recording_{timestamp}.txt")
-
+    wav_filename = os.path.join(output_dir, f"rec_{timestamp}.wav")
+    txt_filename = os.path.join(output_dir, f"rec_{timestamp}.txt")
     try:
-        # Save the processed audio
-        processed_audio_int16 = np.int16(audio_to_process * 32767)
-        write(wav_filename, SAMPLE_RATE, processed_audio_int16)
-        print(f"✅ Processed audio saved to {wav_filename}")
+        write(wav_filename, SAMPLE_RATE, (processed_audio * 32767).astype(np.int16))
+        print(f"✅ Przetworzone audio zapisano w: {wav_filename}")
     except Exception as e:
-        print(f"❌ Error saving audio file: {e}")
-
-    # --- Transcription Logic ---
-    print("🧠 Transcribing... (this may take a moment)")
+        print(f"❌ Błąd podczas zapisywania pliku audio: {e}")
+    print("🧠 Rozpoczynanie transkrypcji...")
     start_time = time.time()
-    
     segments, _ = model.transcribe(
-        audio_to_process, # Use the fully processed audio
+        processed_audio,
         language=settings['language'],
         beam_size=5,
         temperature=0.0,
@@ -155,32 +188,28 @@ def record_and_transcribe(settings):
         log_prob_threshold=-1.0,
         no_speech_threshold=0.6
     )
-    
     end_time = time.time()
-    
     final_text = "".join(segment.text for segment in segments).strip()
-    
-    print(f"🧠 Transcription finished in {end_time - start_time:.2f} seconds.")
-    
+    print(f"🧠 Transkrypcja zakończona w {end_time - start_time:.2f}s.")
     try:
         with open(txt_filename, "w", encoding="utf-8") as f:
             f.write(final_text)
-        print(f"✅ Transcript saved to {txt_filename}")
+        print(f"✅ Transkrypcja zapisana w: {txt_filename}")
     except Exception as e:
-        print(f"❌ Error saving transcript file: {e}")
-
-    print("\n--- Final Result ---")
-    print(f"Full transcribed text: {final_text}")
-
+        print(f"❌ Błąd podczas zapisywania pliku transkrypcji: {e}")
+    print("\n--- Wynik Końcowy ---")
+    print(f"Tekst: {final_text}")
     if final_text:
         pyperclip.copy(final_text)
-        print("✅ Copied to clipboard.")
+        print("✅ Skopiowano do schowka.")
         try:
             time.sleep(0.1)
             subprocess.run(["xdotool", "type", "--clearmodifiers", final_text], check=True)
-            print("✅ Pasted into active window.")
+            print("✅ Wklejono do aktywnego okna.")
+        except FileNotFoundError:
+            print("❌ BŁĄD: Polecenie 'xdotool' nie zostało znalezione.")
         except Exception as e:
-            print(f"❌ Error during pasting: {e}")
+            print(f"❌ Błąd podczas wklejania tekstu: {e}")
 
 def start_recording_flag():
     global is_recording
@@ -193,28 +222,20 @@ def stop_recording_flag():
     if is_recording:
         is_recording = False
 
-# --- Main Execution ---
 if __name__ == "__main__":
-    print("--- Starting Local Dictation Assistant (Simple Quality Test) ---")
+    print("--- Uruchamianie Lokalnego Asystenta Dyktowania (Wersja Wsadowa) ---")
     app_settings = load_configuration()
     load_model(app_settings)
-    
     hotkey_str = app_settings['hotkey']
-    print(f"\n✅ Ready. Press and hold '{hotkey_str}' to record. Release to transcribe.")
-    print("Press Ctrl+C to exit.")
-    
-    HOTKEY_COMBINATION = {
-        keyboard.Key.ctrl,
-        keyboard.Key.f8
-    }
+    print(f"\n✅ Gotowy. Naciśnij i przytrzymaj '{hotkey_str}', aby nagrywać. Puść, aby transkrybować.")
+    print("Naciśnij Ctrl+C, aby wyjść.")
+    HOTKEY_COMBINATION = {keyboard.Key.ctrl, keyboard.Key.f8}
     current_keys = set()
-
     def on_press(key):
         if key in HOTKEY_COMBINATION:
             current_keys.add(key)
             if all(k in current_keys for k in HOTKEY_COMBINATION):
                 start_recording_flag()
-
     def on_release(key):
         try:
             if key in HOTKEY_COMBINATION:
@@ -222,6 +243,5 @@ if __name__ == "__main__":
                 current_keys.clear()
         except KeyError:
             pass
-
     with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
         listener.join()
