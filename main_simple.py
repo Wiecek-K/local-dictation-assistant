@@ -14,6 +14,8 @@ import pyperclip
 import subprocess
 import threading
 from faster_whisper import WhisperModel
+from pydub import AudioSegment
+from pydub.effects import normalize
 from pynput import keyboard
 from scipy.io.wavfile import write
 
@@ -88,18 +90,41 @@ def record_and_transcribe(settings):
 
     audio_data = np.concatenate(audio_frames, axis=0).flatten().astype(np.float32)
 
-    # --- NEW: Audio Preprocessing (Noise Reduction) ---
+    # --- NEW: Advanced Audio Preprocessing Pipeline ---
     try:
-        print("🔊 Applying noise reduction...")
-        # We assume the first 0.5 seconds of the recording is noise
-        # This is a simple but effective approach for this POC
-        noise_clip = audio_data[:int(SAMPLE_RATE * 0.5)]
-        reduced_noise_audio = nr.reduce_noise(y=audio_data, y_noise=noise_clip, sr=SAMPLE_RATE)
-        print("🔊 Noise reduction complete.")
-        # Use the cleaned audio for transcription and saving
+        print("🔊 Starting audio preprocessing...")
+        
+        # Step 1: Convert numpy array to pydub AudioSegment for easy processing
+        # We need to convert float32 to int16 for pydub
+        audio_data_int16 = np.int16(audio_data * 32767)
+        audio_segment = AudioSegment(
+            audio_data_int16.tobytes(), 
+            frame_rate=SAMPLE_RATE,
+            sample_width=audio_data_int16.dtype.itemsize, 
+            channels=1
+        )
+        
+        # Step 2: Normalize volume to a target level (e.g., -20 dBFS)
+        print("   - Normalizing volume...")
+        normalized_segment = normalize(audio_segment, headroom=0.1)
+        
+        # Convert back to numpy array for noise reduction
+        normalized_audio_data = np.array(normalized_segment.get_array_of_samples()).astype(np.float32) / 32767.0
+        
+        # Step 3: Apply a gentler noise reduction
+        print("   - Applying noise reduction...")
+        noise_clip = normalized_audio_data[:int(SAMPLE_RATE * 0.5)]
+        reduced_noise_audio = nr.reduce_noise(
+            y=normalized_audio_data,
+            y_noise=noise_clip,
+            sr=SAMPLE_RATE,
+            prop_decrease=0.8  # Use 80% reduction instead of 100%
+        )
+        
+        print("🔊 Preprocessing complete.")
         audio_to_process = reduced_noise_audio
     except Exception as e:
-        print(f"⚠️ Warning: Noise reduction failed: {e}. Using original audio.")
+        print(f"⚠️ Warning: Preprocessing failed: {e}. Using original audio.")
         audio_to_process = audio_data
 
     # --- Save to File Logic ---
@@ -110,9 +135,10 @@ def record_and_transcribe(settings):
     txt_filename = os.path.join(output_dir, f"recording_{timestamp}.txt")
 
     try:
-        audio_data_int16 = np.int16(audio_to_process * 32767)
-        write(wav_filename, SAMPLE_RATE, audio_data_int16)
-        print(f"✅ Audio saved to {wav_filename}")
+        # Save the processed audio
+        processed_audio_int16 = np.int16(audio_to_process * 32767)
+        write(wav_filename, SAMPLE_RATE, processed_audio_int16)
+        print(f"✅ Processed audio saved to {wav_filename}")
     except Exception as e:
         print(f"❌ Error saving audio file: {e}")
 
@@ -121,7 +147,7 @@ def record_and_transcribe(settings):
     start_time = time.time()
     
     segments, _ = model.transcribe(
-        audio_to_process, # Use the cleaned audio
+        audio_to_process, # Use the fully processed audio
         language=settings['language'],
         beam_size=5,
         temperature=0.0,
@@ -155,7 +181,6 @@ def record_and_transcribe(settings):
             print("✅ Pasted into active window.")
         except Exception as e:
             print(f"❌ Error during pasting: {e}")
-
 
 def start_recording_flag():
     global is_recording
