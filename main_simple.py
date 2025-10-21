@@ -1,5 +1,5 @@
 # main_simple.py
-# Wersja 3.1: Dodano obsługę automatycznego wykrywania języka.
+# Wersja 3.5: Poprawiono nazwy przycisków bocznych myszy (x1 -> button8, x2 -> button9).
 
 import os
 from datetime import datetime
@@ -15,7 +15,7 @@ import threading
 from faster_whisper import WhisperModel
 from pydub import AudioSegment
 from pydub.effects import normalize
-from pynput import keyboard
+from pynput import keyboard, mouse
 from scipy.io.wavfile import write
 
 # --- Globalne Zmienne i Parametry (bez zmian) ---
@@ -33,7 +33,7 @@ DEESSER_ATTACK_MS = 10
 DEESSER_RELEASE_MS = 30
 FINAL_GAIN_DB = 6.0
 
-# --- Funkcje Przetwarzania i Aplikacji (bez zmian, z wyjątkiem logiki języka w record_and_transcribe) ---
+# --- Funkcje Przetwarzania i Aplikacji (bez zmian) ---
 def dynamic_de_esser_smooth(audio_segment, threshold_db, freq_start, freq_end, attenuation_db, attack_ms, release_ms):
     sibilance_band = audio_segment.high_pass_filter(freq_start).low_pass_filter(freq_end)
     chunk_length_ms = 10
@@ -115,7 +115,7 @@ def load_configuration():
             'device': config.get('settings', 'device', fallback='cuda'),
             'compute_type': config.get('settings', 'compute_type', fallback='int8'),
             'hotkey': config.get('settings', 'hotkey', fallback='<ctrl>+f8'),
-            'language': config.get('settings', 'language', fallback='pl'),
+            'language': config.get('settings', 'language', fallback='auto'),
         }
         print("Konfiguracja załadowana pomyślnie.")
         return settings
@@ -154,10 +154,10 @@ def record_and_transcribe(settings):
         print("Nie nagrano żadnego dźwięku.")
         return
     raw_audio_data = np.concatenate(audio_frames, axis=0).flatten().astype(np.float32)
+    
     processed_audio = apply_preprocessing_pipeline(raw_audio_data)
     audio_duration_seconds = len(processed_audio) / SAMPLE_RATE
     
-    # --- ZMIANA TUTAJ: Logika wyboru języka ---
     lang_setting = settings['language']
     language_for_model = None if lang_setting.lower() == 'auto' else lang_setting
     
@@ -207,7 +207,7 @@ def record_and_transcribe(settings):
             print(f"🚀 Współczynnik RTF (Real-Time Factor): {rtf:.3f}")
             print(f"⏱️ Czas do transkrypcji (od puszczenia klawisza): {time_to_transcribe:.2f}s")
             print(f"📋 Czas kopiowania do schowka (pyperclip): {clipboard_duration:.2f}s")
-            print(f"⌨️ Czas samego wklejenia (xdotool + sleep): {pasting_duration:.2f}s")
+            print(f"⌨️ Czas samego wklejania (xdotool + sleep): {pasting_duration:.2f}s")
             print(f"⏱️ Czas do wklejenia (całkowity czas oczekiwania): {time_to_paste:.2f}s")
         except FileNotFoundError:
             print("❌ BŁĄD: Polecenie 'xdotool' nie zostało znalezione.")
@@ -226,54 +226,90 @@ def stop_recording_flag():
         recording_stop_time = time.time()
         is_recording = False
 
+# --- ZMIANA TUTAJ: Poprawiony parser hotkey ---
 def parse_hotkey(hotkey_string):
-    keys = set()
-    parts = hotkey_string.lower().split('+')
-    for part in parts:
-        part = part.strip()
-        key_name = part
-        if part.startswith('<') and part.endswith('>'):
-            key_name = part[1:-1]
-        try:
-            key = getattr(keyboard.Key, key_name)
-            keys.add(key)
-        except AttributeError:
-            if len(key_name) == 1:
-                keys.add(keyboard.KeyCode.from_char(key_name))
-            else:
-                print(f"⚠️ OSTRZEŻENIE: Nieznany klawisz w config.ini: '{key_name}'")
-    return keys
+    hotkey_string = hotkey_string.lower().strip()
 
+    if hotkey_string.startswith('mouse:'):
+        button_name = hotkey_string.split(':')[1].strip()
+        # --- POPRAWKA TUTAJ: Użyto poprawnych nazw przycisków ---
+        button_map = {
+            'button4': mouse.Button.button8, # Zazwyczaj "wstecz"
+            'button5': mouse.Button.button9, # Zazwyczaj "do przodu"
+            'left': mouse.Button.left,
+            'right': mouse.Button.right,
+            'middle': mouse.Button.middle,
+        }
+        if button_name in button_map:
+            return {'type': 'mouse', 'button': button_map[button_name]}
+        else:
+            print(f"⚠️ OSTRZEŻENIE: Nieznany przycisk myszy w config.ini: '{button_name}'")
+            return None
+    else:
+        keys = set()
+        parts = hotkey_string.split('+')
+        for part in parts:
+            part = part.strip()
+            key_name = part
+            if part.startswith('<') and part.endswith('>'):
+                key_name = part[1:-1]
+            try:
+                key = getattr(keyboard.Key, key_name)
+                keys.add(key)
+            except AttributeError:
+                if len(key_name) == 1:
+                    keys.add(keyboard.KeyCode.from_char(key_name))
+                else:
+                    print(f"⚠️ OSTRZEŻENIE: Nieznany klawisz w config.ini: '{key_name}'")
+        return {'type': 'keyboard', 'key_set': keys}
+
+# --- Główna pętla z wyborem listenera (bez zmian) ---
 if __name__ == "__main__":
     print("--- Uruchamianie Lokalnego Asystenta Dyktowania (Wersja Wsadowa) ---")
     app_settings = load_configuration()
     load_model(app_settings)
     hotkey_str = app_settings['hotkey']
     
-    HOTKEY_COMBINATION = parse_hotkey(hotkey_str)
+    hotkey_config = parse_hotkey(hotkey_str)
     
-    if not HOTKEY_COMBINATION:
-        print("❌ BŁĄD KRYTYCZNY: Nie udało się sparsować skrótu klawiszowego. Kończenie pracy.")
+    if not hotkey_config:
+        print("❌ BŁĄD KRYTYCZNY: Nie udało się sparsować skrótu. Kończenie pracy.")
         sys.exit(1)
 
     print(f"\n✅ Gotowy. Naciśnij i przytrzymaj '{hotkey_str}', aby nagrywać. Puść, aby transkrybować.")
     print("Naciśnij Ctrl+C, aby wyjść.")
     
-    current_keys = set()
+    if hotkey_config['type'] == 'keyboard':
+        HOTKEY_COMBINATION = hotkey_config['key_set']
+        current_keys = set()
 
-    def on_press(key):
-        if key in HOTKEY_COMBINATION:
-            current_keys.add(key)
-            if current_keys == HOTKEY_COMBINATION:
-                start_recording_flag()
+        def on_press_keyboard(key):
+            if key in HOTKEY_COMBINATION:
+                current_keys.add(key)
+                if current_keys == HOTKEY_COMBINATION:
+                    start_recording_flag()
 
-    def on_release(key):
-        if key in HOTKEY_COMBINATION:
-            stop_recording_flag()
-            try:
-                current_keys.remove(key)
-            except KeyError:
-                pass
+        def on_release_keyboard(key):
+            if key in HOTKEY_COMBINATION:
+                stop_recording_flag()
+                try:
+                    current_keys.remove(key)
+                except KeyError:
+                    pass
+        
+        listener = keyboard.Listener(on_press=on_press_keyboard, on_release=on_release_keyboard)
 
-    with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
+    elif hotkey_config['type'] == 'mouse':
+        MOUSE_BUTTON = hotkey_config['button']
+
+        def on_click_mouse(x, y, button, pressed):
+            if button == MOUSE_BUTTON:
+                if pressed:
+                    start_recording_flag()
+                else:
+                    stop_recording_flag()
+
+        listener = mouse.Listener(on_click=on_click_mouse)
+
+    with listener:
         listener.join()
