@@ -44,6 +44,7 @@ def load_configuration():
             'vad_filter': config.getboolean('advanced', 'vad_filter', fallback=True),
             'log_prob_threshold': config.getfloat('advanced', 'log_prob_threshold', fallback=-1.0),
             'no_speech_threshold': config.getfloat('advanced', 'no_speech_threshold', fallback=0.6),
+            'local_files_only': config.getboolean('advanced', 'local_files_only', fallback=True)
         })
         app_logger.info("Konfiguracja załadowana pomyślnie.")
         return settings
@@ -57,7 +58,7 @@ def load_model(settings):
     app_logger.info(f"Próba załadowania modelu: '{settings['model_path']}' ({settings['device']}, {settings['compute_type']})")
     start_time = time.time()
     try:
-        model = WhisperModel(settings['model_path'], device=settings['device'], compute_type=settings['compute_type'])
+        model = WhisperModel(settings['model_path'], device=settings['device'], compute_type=settings['compute_type'], local_files_only=settings['local_files_only'])
         app_logger.info(f"✅ Model załadowany pomyślnie w {time.time() - start_time:.2f}s.")
     except Exception as e:
         app_logger.critical(f"❌ BŁĄD KRYTYCZNY: Nie udało się załadować modelu Whisper: {e}")
