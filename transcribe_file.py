@@ -1,47 +1,45 @@
-# /testing_suite/run_comparison_test.py
-# Wersja 2: Poprawione ścieżki, zakładając, że skrypt jest w podkatalogu,
-# a plik config.ini znajduje się w głównym katalogu projektu.
+# transcribe_file.py
+# Wersja 2.0: Przekształcono w narzędzie CLI do transkrypcji pojedynczych plików.
+# Użycie: python transcribe_file.py <ścieżka_do_pliku_audio> [--no-preprocessing]
 
 import sys
+import os
 import time
+import argparse
 import configparser
 import librosa
 from faster_whisper import WhisperModel
-import os
 
-# --- Konfiguracja Ścieżek ---
-# Skrypt znajduje się w 'testing_suite', więc musimy odwołać się do katalogu nadrzędnego
-PARENT_DIR = os.path.dirname(os.path.abspath(__file__))
-# Główny katalog projektu jest teraz dwa poziomy wyżej
-ROOT_DIR = os.path.dirname(PARENT_DIR)
+# Dodaj katalog główny do ścieżki, aby umożliwić import audio_processing
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(ROOT_DIR)
+try:
+    from audio_processing import apply_preprocessing_pipeline, SAMPLE_RATE
+except ImportError:
+    print("BŁĄD: Nie można zaimportować modułu 'audio_processing'. Upewnij się, że plik audio_processing.py istnieje.")
+    sys.exit(1)
 
-CONFIG_PATH = os.path.join(ROOT_DIR, 'config.ini')
-RAW_AUDIO_PATH = os.path.join(PARENT_DIR, 'sibilants_test.wav')
-PROCESSED_AUDIO_PATH = os.path.join(PARENT_DIR, 'test_outputs', 'sibilants_test_processed.wav')
-
-def load_configuration(override_model_path=None):
-    """Wczytuje konfigurację i opcjonalnie nadpisuje ścieżkę modelu."""
+def load_configuration():
+    """Wczytuje konfigurację modelu z pliku config.ini."""
     config = configparser.ConfigParser()
+    config_path = os.path.join(ROOT_DIR, 'config.ini')
     try:
-        config.read(CONFIG_PATH)
+        config.read(config_path)
         settings = {
-            'model_path': config.get('settings', 'model_path', fallback='small'),
+            'model_path': config.get('settings', 'model_path', fallback='medium'),
             'device': config.get('settings', 'device', fallback='cuda'),
             'compute_type': config.get('settings', 'compute_type', fallback='int8'),
-            'language': config.get('settings', 'language', fallback='pl'),
+            'language': config.get('settings', 'language', fallback='auto'),
         }
-        if override_model_path:
-            print(f"INFO: Nadpisywanie modelu z config.ini na: '{override_model_path}'")
-            settings['model_path'] = override_model_path
         return settings
     except Exception as e:
-        print(f"Błąd wczytywania {CONFIG_PATH}: {e}")
+        print(f"Błąd wczytywania {config_path}: {e}")
         sys.exit(1)
 
 def load_model(settings):
     """Wczytuje i zwraca model Whisper na podstawie ustawień."""
     model_path = settings['model_path']
-    print(f"\n--- Ładowanie Modelu '{model_path}' ---")
+    print(f"--- Ładowanie Modelu '{model_path}' ({settings['device']}, {settings['compute_type']}) ---")
     start_time = time.time()
     try:
         model = WhisperModel(model_path, device=settings['device'], compute_type=settings['compute_type'])
@@ -49,63 +47,70 @@ def load_model(settings):
         return model
     except Exception as e:
         print(f"❌ BŁĄD KRYTYCZNY: Nie udało się załadować modelu: {e}")
-        return None
-
-def transcribe_audio(model, file_path, language):
-    """Transkrybuje pojedynczy plik audio i zwraca tekst."""
-    if not os.path.exists(file_path):
-        print(f"❌ BŁĄD: Plik audio nie istnieje: {file_path}")
-        if "processed" in file_path:
-            print("   -> Upewnij się, że najpierw uruchomiłeś 'test_preprocessing.py', aby wygenerować ten plik.")
-        return "[BŁĄD: BRAK PLIKU]"
-        
-    print(f"   -> Transkrypcja pliku: {os.path.basename(file_path)}...")
-    try:
-        audio_data, sr = librosa.load(file_path, sr=16000, mono=True)
-        segments, _ = model.transcribe(audio_data, language=language, beam_size=5)
-        return "".join(segment.text for segment in segments).strip()
-    except Exception as e:
-        print(f"   -> ❌ Błąd podczas transkrypcji: {e}")
-        return f"[BŁĄD TRANSKRYPCJI: {e}]"
+        sys.exit(1)
 
 def main():
-    print("--- Uruchamianie Pełnego Testu Porównawczego Transkrypcji ---")
+    # --- Parsowanie argumentów linii poleceń ---
+    parser = argparse.ArgumentParser(
+        description="Dokonuje transkrypcji pliku audio przy użyciu modelu Whisper."
+    )
+    parser.add_argument(
+        "filepath",
+        help="Ścieżka do pliku audio do przetworzenia."
+    )
+    parser.add_argument(
+        "--no-preprocessing",
+        action="store_true",
+        help="Wyłącza potok przetwarzania wstępnego audio (transkrybuje surowy plik)."
+    )
+    args = parser.parse_args()
 
-    results = {}
+    # --- Walidacja pliku wejściowego ---
+    if not os.path.exists(args.filepath):
+        print(f"❌ BŁĄD: Plik nie istnieje: {args.filepath}")
+        sys.exit(1)
 
-    # --- Test 1: Model z config.ini (domyślnie 'small') ---
-    settings_small = load_configuration()
-    model_small = load_model(settings_small)
-    if model_small:
-        results['raw_small'] = transcribe_audio(model_small, RAW_AUDIO_PATH, settings_small['language'])
-        results['processed_small'] = transcribe_audio(model_small, PROCESSED_AUDIO_PATH, settings_small['language'])
-        del model_small
+    # --- Wczytanie konfiguracji i modelu ---
+    app_settings = load_configuration()
+    model = load_model(app_settings)
 
-    # --- Test 2: Model 'medium' ---
-    settings_medium = load_configuration(override_model_path="medium")
-    model_medium = load_model(settings_medium)
-    if model_medium:
-        results['raw_medium'] = transcribe_audio(model_medium, RAW_AUDIO_PATH, settings_medium['language'])
-        results['processed_medium'] = transcribe_audio(model_medium, PROCESSED_AUDIO_PATH, settings_medium['language'])
-        del model_medium
+    # --- Wczytanie i przetwarzanie audio ---
+    print(f"\n--- Przetwarzanie pliku: {os.path.basename(args.filepath)} ---")
+    try:
+        audio_data, _ = librosa.load(args.filepath, sr=SAMPLE_RATE, mono=True)
+    except Exception as e:
+        print(f"❌ BŁĄD: Nie udało się wczytać pliku audio: {e}")
+        sys.exit(1)
 
-    # --- Podsumowanie Wyników ---
-    print("\n\n" + "="*80)
-    print("--- PODSUMOWANIE WYNIKÓW TESTU PORÓWNAWCZEGO ---")
-    print("="*80)
+    if not args.no_preprocessing:
+        audio_data = apply_preprocessing_pipeline(audio_data)
+    else:
+        print("🔊 Przetwarzanie wstępne audio pominięte (opcja --no-preprocessing).")
 
-    print("\n--- 1. SUROWY PLIK (.wav) ---")
-    print(f"\n[Model 'small']:\n{results.get('raw_small', 'N/A')}")
-    print(f"\n[Model 'medium']:\n{results.get('raw_medium', 'N/A')}")
+    # --- Transkrypcja ---
+    print("\n🧠 Rozpoczynanie transkrypcji...")
+    transcription_start_time = time.time()
+    
+    language_for_model = None if app_settings['language'].lower() == 'auto' else app_settings['language']
+    
+    segments_generator, info = model.transcribe(
+        audio_data, language=language_for_model, beam_size=5
+    )
 
-    print("\n\n" + "-"*80)
+    if language_for_model is None:
+        print(f"   -> Wykryto język: {info.language} (prawdopodobieństwo: {info.language_probability:.2f})")
 
-    print("\n--- 2. PLIK PRZETWORZONY (po preprocessingu) ---")
-    print(f"\n[Model 'small']:\n{results.get('processed_small', 'N/A')}")
-    print(f"\n[Model 'medium']:\n{results.get('processed_medium', 'N/A')}")
+    final_text = "".join(segment.text for segment in segments_generator).strip()
+    transcription_duration = time.time() - transcription_start_time
+    
+    print(f"   -> Transkrypcja zakończona w {transcription_duration:.2f}s.")
 
+    # --- Wyświetlenie wyniku ---
     print("\n" + "="*80)
-    print("--- Koniec Testu ---")
+    print("--- WYNIK TRANSKRYPCJI ---")
+    print("="*80)
+    print(final_text)
+    print("="*80)
 
 if __name__ == "__main__":
     main()
