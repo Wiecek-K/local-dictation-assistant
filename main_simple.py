@@ -1,5 +1,5 @@
 # main_simple.py
-# Wersja 3.6: Refaktoryzacja. Logika preprocessingu przeniesiona do audio_preprocessing.
+# Wersja 3.8: Dodano spację na końcu transkrypcji w celu ułatwienia dyktowania seryjnego.
 
 import configparser
 import sys
@@ -91,14 +91,15 @@ def record_and_transcribe(settings):
     if language_for_model is None:
         print(f"   -> Wykryto język: {info.language} (prawdopodobieństwo: {info.language_probability:.2f})")
 
-    final_text = "".join(segment.text for segment in segments_generator).strip()
+    # --- ZMIANA TUTAJ: Dodano spację na końcu tekstu ---
+    final_text = "".join(segment.text for segment in segments_generator).strip() + " "
     transcription_end_time = time.time()
     
     transcription_duration = transcription_end_time - transcription_start_time
     
     print("\n--- Wynik Końcowy ---")
     print(f"Tekst: {final_text}")
-    if final_text:
+    if final_text.strip(): # Sprawdź, czy tekst nie składa się tylko ze spacji
         before_clipboard_time = time.time()
         pyperclip.copy(final_text)
         after_clipboard_time = time.time()
