@@ -1,110 +1,25 @@
 # main_simple.py
-# Wersja 3.5: Poprawiono nazwy przycisków bocznych myszy (x1 -> button8, x2 -> button9).
+# Wersja 3.6: Refaktoryzacja. Logika preprocessingu przeniesiona do audio_processing.py.
 
-import os
-from datetime import datetime
 import configparser
 import sys
 import time
 import numpy as np
-import noisereduce as nr
 import sounddevice as sd
 import pyperclip
 import subprocess
 import threading
 from faster_whisper import WhisperModel
-from pydub import AudioSegment
-from pydub.effects import normalize
 from pynput import keyboard, mouse
-from scipy.io.wavfile import write
 
-# --- Globalne Zmienne i Parametry (bez zmian) ---
-model = None
-is_recording = False
-audio_frames = []
-app_settings = {}
-recording_stop_time = 0
-SAMPLE_RATE = 16000
-DEESSER_THRESH_DB = -43
-DEESSER_ATTENUATION_DB = 13
-DEESSER_FREQ_START = 6000
-DEESSER_FREQ_END = 10000
-DEESSER_ATTACK_MS = 10
-DEESSER_RELEASE_MS = 30
-FINAL_GAIN_DB = 6.0
+from audio_processing import apply_preprocessing_pipeline, SAMPLE_RATE
 
-# --- Funkcje Przetwarzania i Aplikacji (bez zmian) ---
-def dynamic_de_esser_smooth(audio_segment, threshold_db, freq_start, freq_end, attenuation_db, attack_ms, release_ms):
-    sibilance_band = audio_segment.high_pass_filter(freq_start).low_pass_filter(freq_end)
-    chunk_length_ms = 10
-    is_attenuating = False
-    processed_audio = AudioSegment.empty()
-    for i in range(0, len(audio_segment), chunk_length_ms):
-        chunk_original = audio_segment[i:i+chunk_length_ms]
-        chunk_sibilance = sibilance_band[i:i+chunk_length_ms]
-        should_attenuate = chunk_sibilance.dBFS > threshold_db
-        if should_attenuate and not is_attenuating:
-            chunk_attenuated = chunk_original - attenuation_db
-            transition = chunk_original.fade(to_gain=-120, start=0, duration=attack_ms).overlay(chunk_attenuated.fade(from_gain=-120, start=0, duration=attack_ms))
-            processed_audio += transition
-            is_attenuating = True
-        elif not should_attenuate and is_attenuating:
-            chunk_attenuated = chunk_original - attenuation_db
-            transition = chunk_attenuated.fade(to_gain=-120, start=0, duration=release_ms).overlay(chunk_original.fade(from_gain=-120, start=0, duration=release_ms))
-            processed_audio += transition
-            is_attenuating = False
-        elif is_attenuating:
-            processed_audio += (chunk_original - attenuation_db)
-        else:
-            processed_audio += chunk_original
-    return processed_audio
-
-def apply_preprocessing_pipeline(audio_data_float32):
-    print("🔊 Uruchamianie potoku przetwarzania wstępnego audio...")
-    pipeline_start_time = time.time()
-    last_step_time = pipeline_start_time
-    try:
-        audio_data_int16 = np.int16(audio_data_float32 * 32767)
-        audio_segment = AudioSegment(
-            audio_data_int16.tobytes(), 
-            frame_rate=SAMPLE_RATE,
-            sample_width=audio_data_int16.dtype.itemsize, 
-            channels=1
-        )
-        print(f"   - Krok 1: Normalizacja głośności...")
-        normalized_segment = normalize(audio_segment)
-        current_time = time.time()
-        print(f"     (czas: {current_time - last_step_time:.2f}s)")
-        last_step_time = current_time
-        print(f"   - Krok 2: Aplikowanie de-essera z wygładzaniem...")
-        deessed_segment = dynamic_de_esser_smooth(
-            normalized_segment, 
-            DEESSER_THRESH_DB, DEESSER_FREQ_START, DEESSER_FREQ_END, 
-            DEESSER_ATTENUATION_DB, DEESSER_ATTACK_MS, DEESSER_RELEASE_MS
-        )
-        current_time = time.time()
-        print(f"     (czas: {current_time - last_step_time:.2f}s)")
-        last_step_time = current_time
-        print(f"   - Krok 3: Podbicie głośności o +{FINAL_GAIN_DB} dB...")
-        boosted_segment = deessed_segment + FINAL_GAIN_DB
-        current_time = time.time()
-        print(f"     (czas: {current_time - last_step_time:.2f}s)")
-        last_step_time = current_time
-        processed_before_nr = np.array(boosted_segment.get_array_of_samples(), dtype=np.float32) / 32767.0
-        print("   - Krok 4: Aplikowanie redukcji szumu...")
-        noise_clip = processed_before_nr[:int(SAMPLE_RATE * 0.5)]
-        final_audio_float32 = nr.reduce_noise(
-            y=processed_before_nr, y_noise=noise_clip, sr=SAMPLE_RATE, prop_decrease=0.85
-        )
-        current_time = time.time()
-        print(f"     (czas: {current_time - last_step_time:.2f}s)")
-        last_step_time = current_time
-        print(f"🔊 Przetwarzanie wstępne zakończone pomyślnie (całkowity czas: {time.time() - pipeline_start_time:.2f}s).")
-        return final_audio_float32
-    except Exception as e:
-        print(f"⚠️ OSTRZEŻENIE: Przetwarzanie wstępne nie powiodło się: {e}.")
-        print("   Używanie oryginalnego, surowego audio.")
-        return audio_data_float32
+# --- Globalne Zmienne i Parametry ---
+model = None                        # Przechowuje załadowaną instancję modelu Whisper.
+is_recording = False                # Flaga (boolean) kontrolująca stan nagrywania (True, gdy nagrywa).
+audio_frames = []                   # Lista przechowująca fragmenty (ramki) surowego audio podczas nagrywania.
+app_settings = {}                   # Słownik przechowujący ustawienia wczytane z pliku config.ini.
+recording_stop_time = 0             # Przechowuje znacznik czasu (timestamp) zatrzymania nagrywania do pomiaru wydajności.
 
 def load_configuration():
     config = configparser.ConfigParser()
@@ -226,16 +141,14 @@ def stop_recording_flag():
         recording_stop_time = time.time()
         is_recording = False
 
-# --- ZMIANA TUTAJ: Poprawiony parser hotkey ---
 def parse_hotkey(hotkey_string):
     hotkey_string = hotkey_string.lower().strip()
 
     if hotkey_string.startswith('mouse:'):
         button_name = hotkey_string.split(':')[1].strip()
-        # --- POPRAWKA TUTAJ: Użyto poprawnych nazw przycisków ---
         button_map = {
-            'button4': mouse.Button.button8, # Zazwyczaj "wstecz"
-            'button5': mouse.Button.button9, # Zazwyczaj "do przodu"
+            'button4': mouse.Button.button8,
+            'button5': mouse.Button.button9,
             'left': mouse.Button.left,
             'right': mouse.Button.right,
             'middle': mouse.Button.middle,
@@ -263,7 +176,6 @@ def parse_hotkey(hotkey_string):
                     print(f"⚠️ OSTRZEŻENIE: Nieznany klawisz w config.ini: '{key_name}'")
         return {'type': 'keyboard', 'key_set': keys}
 
-# --- Główna pętla z wyborem listenera (bez zmian) ---
 if __name__ == "__main__":
     print("--- Uruchamianie Lokalnego Asystenta Dyktowania (Wersja Wsadowa) ---")
     app_settings = load_configuration()
