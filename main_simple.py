@@ -1,5 +1,5 @@
 # main_simple.py
-# Wersja 3.8: Dodano spację na końcu transkrypcji w celu ułatwienia dyktowania seryjnego.
+# Wersja 3.10: Dodano logi diagnostyczne dla parametrów transkrypcji.
 
 import configparser
 import sys
@@ -22,17 +22,23 @@ app_settings = {}                   # Słownik przechowujący ustawienia wczytan
 recording_stop_time = 0             # Przechowuje znacznik czasu (timestamp) zatrzymania nagrywania do pomiaru wydajności.
 
 def load_configuration():
+    """Wczytuje konfigurację z pliku config.ini z podziałem na sekcje."""
     config = configparser.ConfigParser()
     try:
         config.read('config.ini')
         settings = {
             'model_path': config.get('settings', 'model_path', fallback='medium'),
             'device': config.get('settings', 'device', fallback='cuda'),
-            'compute_type': config.get('settings', 'compute_type', fallback='int8'),
             'hotkey': config.get('settings', 'hotkey', fallback='<ctrl>+f8'),
             'language': config.get('settings', 'language', fallback='auto'),
         }
-        print("Konfiguracja załadowana pomyślnie.")
+        settings.update({
+            'compute_type': config.get('advanced', 'compute_type', fallback='int8'),
+            'vad_filter': config.getboolean('advanced', 'vad_filter', fallback=True),
+            'log_prob_threshold': config.getfloat('advanced', 'log_prob_threshold', fallback=-1.0),
+            'no_speech_threshold': config.getfloat('advanced', 'no_speech_threshold', fallback=0.6),
+        })
+        print("Konfiguracja załadowana pomyślnie (z podziałem na sekcje).")
         return settings
     except (FileNotFoundError, configparser.Error) as e:
         print(f"Błąd wczytywania config.ini: {e}"), sys.exit(1)
@@ -76,22 +82,25 @@ def record_and_transcribe(settings):
     lang_setting = settings['language']
     language_for_model = None if lang_setting.lower() == 'auto' else lang_setting
     
-    if language_for_model is None:
-        print("🧠 Rozpoczynanie transkrypcji (z automatycznym wykrywaniem języka)...")
-    else:
-        print(f"🧠 Rozpoczynanie transkrypcji (język: {language_for_model})...")
-        
-    print(f"   -> Długość audio do transkrypcji: {audio_duration_seconds:.2f}s")
+    # --- NOWY LOG DIAGNOSTYCZNY ---
+    print("🧠 Rozpoczynanie transkrypcji...")
+    print(f"   -> Długość audio: {audio_duration_seconds:.2f}s")
+    print(f"   -> Używane parametry: VAD={settings['vad_filter']}, LogProb={settings['log_prob_threshold']}, NoSpeech={settings['no_speech_threshold']}")
     
     transcription_start_time = time.time()
+    
     segments_generator, info = model.transcribe(
-        processed_audio, language=language_for_model, beam_size=5
+        processed_audio,
+        language=language_for_model,
+        beam_size=5,
+        vad_filter=settings['vad_filter'],
+        log_prob_threshold=settings['log_prob_threshold'],
+        no_speech_threshold=settings['no_speech_threshold']
     )
     
     if language_for_model is None:
         print(f"   -> Wykryto język: {info.language} (prawdopodobieństwo: {info.language_probability:.2f})")
 
-    # --- ZMIANA TUTAJ: Dodano spację na końcu tekstu ---
     final_text = "".join(segment.text for segment in segments_generator).strip() + " "
     transcription_end_time = time.time()
     
@@ -99,7 +108,7 @@ def record_and_transcribe(settings):
     
     print("\n--- Wynik Końcowy ---")
     print(f"Tekst: {final_text}")
-    if final_text.strip(): # Sprawdź, czy tekst nie składa się tylko ze spacji
+    if final_text.strip():
         before_clipboard_time = time.time()
         pyperclip.copy(final_text)
         after_clipboard_time = time.time()
@@ -130,6 +139,7 @@ def record_and_transcribe(settings):
         except Exception as e:
             print(f"❌ Błąd podczas wklejania tekstu: {e}")
 
+# ... reszta pliku bez zmian (start_recording_flag, stop_recording_flag, parse_hotkey, __main__) ...
 def start_recording_flag():
     global is_recording
     if not is_recording:
