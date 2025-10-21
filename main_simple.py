@@ -1,5 +1,5 @@
 # main_simple.py
-# Wersja 3.6: Refaktoryzacja. Logika preprocessingu przeniesiona do audio_processing.py.
+# Wersja 3.6: Refaktoryzacja. Logika preprocessingu przeniesiona do audio_preprocessing.
 
 import configparser
 import sys
@@ -12,7 +12,7 @@ import threading
 from faster_whisper import WhisperModel
 from pynput import keyboard, mouse
 
-from audio_processing import apply_preprocessing_pipeline, SAMPLE_RATE
+from src.audio_preprocessing import apply_preprocessing_pipeline, SAMPLE_RATE
 
 # --- Globalne Zmienne i Parametry ---
 model = None                        # Przechowuje załadowaną instancję modelu Whisper.

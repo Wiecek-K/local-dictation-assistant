@@ -14,7 +14,7 @@ from faster_whisper import WhisperModel
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(ROOT_DIR)
 try:
-    from audio_processing import apply_preprocessing_pipeline, SAMPLE_RATE
+    from src.audio_preprocessing import apply_preprocessing_pipeline, SAMPLE_RATE
 except ImportError:
     print("BŁĄD: Nie można zaimportować modułu 'audio_processing'. Upewnij się, że plik audio_processing.py istnieje.")
     sys.exit(1)

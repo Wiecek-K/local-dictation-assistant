@@ -20,7 +20,7 @@ except ImportError:
 PARENT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(PARENT_DIR)
 sys.path.append(ROOT_DIR)
-from audio_processing import apply_preprocessing_pipeline, SAMPLE_RATE
+from src.audio_preprocessing import apply_preprocessing_pipeline, SAMPLE_RATE
 
 CONFIG_PATH = os.path.join(ROOT_DIR, 'config.ini')
 RAW_AUDIO_PATH = os.path.join(PARENT_DIR, 'sibilants_test.wav')
