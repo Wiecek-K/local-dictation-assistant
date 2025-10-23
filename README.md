@@ -1,11 +1,17 @@
 ### **Dokumentacja Projektowa: Lokalny Asystent Dyktowania**
 
-**Wersja:** 1.3
-**Data:** 20.10.2025
+**Wersja:** 1.4
+**Data:** 21.10.2025
 **Autorzy Zmian:** [Ajmag], AI Architect
 
 ### Dziennik Zmian (Changelog)
 
+- **Wersja 1.4 (21.10.2025):**
+  - **Rozwiązano krytyczny problem pętli powtórzeń** modelu Whisper poprzez implementację zaawansowanych, konfigurowalnych parametrów transkrypcji (`vad_filter`, `log_prob_threshold`, `no_speech_threshold`).
+  - **Zrefaktoryzowano strukturę projektu:** Wprowadzono katalog `src/` dla modułów wewnętrznych, co poprawiło organizację i skalowalność kodu.
+  - **Wdrożono profesjonalny, segmentowy system logowania** (`app`, `preprocessing`, `transcription`, `performance`), w pełni konfigurowalny z pliku `config.ini`.
+  - **Ulepszono plik konfiguracyjny**, dzieląc go na sekcje `[settings]` i `[advanced]` dla poprawy UX i bezpieczeństwa.
+  - **Przywrócono pełną zgodność z zasadą "Offline-First"** poprzez dodanie opcji `local_files_only` do konfiguracji.
 - **Wersja 1.3 (20.10.2025):**
   - Zaimplementowano precyzyjne logowanie wydajności, identyfikując prawdziwy czas trwania każdego etapu (preprocessing, transkrypcja, wklejanie).
   - Potwierdzono, że `model.transcribe` działa jako generator, a poprawny pomiar czasu wymaga pełnej iteracji po wynikach.
@@ -193,7 +199,7 @@ Faza rozwoju zostaje podzielona na dwa główne etapy:
 
 ```
 +---------------------------------------------------------------------------------+
-|                                  Użytkownik                                     |
+| Użytkownik |
 +---------------------------------------------------------------------------------+
        |                                      ^
        | Interakcja (zmiana ustawień)         | Informacja o statusie
@@ -209,7 +215,7 @@ Faza rozwoju zostaje podzielona na dwa główne etapy:
        |    do pliku konfiguracyjnego         |    przy starcie lub na sygnał
        v                                      |
 +---------------------------------------------------------------------------------+
-|                                Plik config.ini                                  |
+| Plik config.ini |
 +---------------------------------------------------------------------------------+
 ```
 
@@ -233,8 +239,8 @@ Nasze testy wykazały, że dla modelu `medium` na docelowym sprzęcie, **RTF wyn
 ### 6. Potencjalne Kierunki Rozwoju (Roadmap)
 
 - **Optymalizacja wydajności potoku preprocessingu:** Przepisanie krytycznych funkcji (np. de-esser) z użyciem niższych poziomów bibliotek (np. `numpy`, `scipy.signal`) w celu redukcji latencji po stronie CPU.
-- **Zaawansowane strojenie parametrów Whisper:** Dalsze eksperymenty z parametrami takimi jak `compression_ratio_threshold` w celu eliminacji problemu pętli powtórzeń przy dłuższych dyktandach.
+- **Dalsze strojenie parametrów Whisper:** Eksperymenty z dodatkowymi parametrami (np. `compression_ratio_threshold`) w celu dalszej poprawy jakości transkrypcji.
 - **Słownik niestandardowy:** Możliwość dodania własnych słów (terminologia techniczna, nazwy funkcji).
 - **Wsparcie dla Wayland:** Zbadanie alternatyw dla `xdotool` i `pynput`.
 - **Zaawansowane formatowanie:** Automatyczne dodawanie interpunkcji.
-- **Inteligentna edycja tekstu (Post-processing):** Możliwość wykorzystania małego, lokalnego modelu językowego (LLM) do automatycznego usuwania pomyłek i powtórzeń.```
+- **Inteligentna edycja tekstu (Post-processing):** Możliwość wykorzystania małego, lokalnego modelu językowego (LLM) do automatycznego usuwania pomyłek i powtórzeń.
