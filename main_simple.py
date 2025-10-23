@@ -15,6 +15,7 @@ import logging
 
 from src.audio_preprocessing import apply_preprocessing_pipeline, SAMPLE_RATE
 from src.logger_setup import setup_loggers
+from src.core_utils import load_configuration, load_model
 
 # --- Inicjalizacja Loggerów ---
 app_logger = logging.getLogger('app')
@@ -28,43 +29,7 @@ audio_frames = []
 app_settings = {}
 recording_stop_time = 0
 
-def load_configuration():
-    """Wczytuje konfigurację z pliku config.ini z podziałem na sekcje."""
-    config = configparser.ConfigParser()
-    try:
-        config.read('config.ini')
-        settings = {
-            'model_path': config.get('settings', 'model_path', fallback='medium'),
-            'device': config.get('settings', 'device', fallback='cuda'),
-            'hotkey': config.get('settings', 'hotkey', fallback='<ctrl>+f8'),
-            'language': config.get('settings', 'language', fallback='auto'),
-        }
-        settings.update({
-            'compute_type': config.get('advanced', 'compute_type', fallback='int8'),
-            'vad_filter': config.getboolean('advanced', 'vad_filter', fallback=True),
-            'log_prob_threshold': config.getfloat('advanced', 'log_prob_threshold', fallback=-1.0),
-            'no_speech_threshold': config.getfloat('advanced', 'no_speech_threshold', fallback=0.6),
-            'local_files_only': config.getboolean('advanced', 'local_files_only', fallback=True)
-        })
-        app_logger.info("Konfiguracja załadowana pomyślnie.")
-        return settings
-    except (FileNotFoundError, configparser.Error) as e:
-        app_logger.error(f"Błąd wczytywania config.ini: {e}")
-        sys.exit(1)
-
-def load_model(settings):
-    global model
-    app_logger.info("\n--- Ładowanie Modelu ---")
-    app_logger.info(f"Próba załadowania modelu: '{settings['model_path']}' ({settings['device']}, {settings['compute_type']})")
-    start_time = time.time()
-    try:
-        model = WhisperModel(settings['model_path'], device=settings['device'], compute_type=settings['compute_type'], local_files_only=settings['local_files_only'])
-        app_logger.info(f"✅ Model załadowany pomyślnie w {time.time() - start_time:.2f}s.")
-    except Exception as e:
-        app_logger.critical(f"❌ BŁĄD KRYTYCZNY: Nie udało się załadować modelu Whisper: {e}")
-        sys.exit(1)
-
-def record_and_transcribe(settings):
+def record_and_transcribe(settings, model_instance):
     global audio_frames, recording_stop_time
     app_logger.info("\n🎙️  Nagrywanie... Mów teraz.")
     audio_frames = []
@@ -95,7 +60,7 @@ def record_and_transcribe(settings):
     
     transcription_start_time = time.time()
     
-    segments_generator, info = model.transcribe(
+    segments_generator, info = model_instance.transcribe(
         processed_audio,
         language=language_for_model,
         beam_size=5,
@@ -146,11 +111,11 @@ def record_and_transcribe(settings):
         except Exception as e:
             app_logger.error(f"❌ Błąd podczas wklejania tekstu: {e}")
 
-def start_recording_flag():
+def start_recording_flag(model_instance): # ZMIANA: Funkcja przyjmuje model jako argument
     global is_recording
     if not is_recording:
         is_recording = True
-        threading.Thread(target=record_and_transcribe, args=(app_settings,)).start()
+        threading.Thread(target=record_and_transcribe, args=(app_settings, model_instance)).start() 
 
 def stop_recording_flag():
     global is_recording, recording_stop_time
@@ -192,9 +157,8 @@ if __name__ == "__main__":
     
     app_logger.info("--- Uruchamianie Lokalnego Asystenta Dyktowania (Wersja Wsadowa) ---")
     app_settings = load_configuration()
-    load_model(app_settings)
+    model_instance = load_model(app_settings) 
     hotkey_str = app_settings['hotkey']
-    
     hotkey_config = parse_hotkey(hotkey_str)
     
     if not hotkey_config:
@@ -211,7 +175,7 @@ if __name__ == "__main__":
         def on_press_keyboard(key):
             if key in HOTKEY_COMBINATION:
                 current_keys.add(key)
-                if current_keys == HOTKEY_COMBINATION: start_recording_flag()
+                if current_keys == HOTKEY_COMBINATION: start_recording_flag(model_instance) 
         def on_release_keyboard(key):
             if key in HOTKEY_COMBINATION:
                 stop_recording_flag()
@@ -222,7 +186,7 @@ if __name__ == "__main__":
         MOUSE_BUTTON = hotkey_config['button']
         def on_click_mouse(x, y, button, pressed):
             if button == MOUSE_BUTTON:
-                if pressed: start_recording_flag()
+                if pressed: start_recording_flag(model_instance) 
                 else: stop_recording_flag()
         listener = mouse.Listener(on_click=on_click_mouse)
 
