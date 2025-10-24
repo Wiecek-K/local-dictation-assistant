@@ -19,7 +19,7 @@ DEESSER_FREQ_START = 6000           # [Hz] Dolna granica pasma częstotliwości,
 DEESSER_FREQ_END = 10000            # [Hz] Górna granica pasma częstotliwości, w którym działa de-esser.
 DEESSER_ATTACK_MS = 10              # [ms] Czas potrzebny na osiągnięcie pełnego tłumienia (wygładza początek).
 DEESSER_RELEASE_MS = 30             # [ms] Czas powrotu do normalnej głośności (wygładza koniec, eliminuje trzaski).
-FINAL_GAIN_DB = 6.0                 # [dB] Końcowe podbicie głośności całego nagrania po przetworzeniu.
+FINAL_GAIN_DB = 7.0                 # [dB] Końcowe podbicie głośności całego nagrania po przetworzeniu.
 
 def dynamic_de_esser_smooth(audio_segment, threshold_db, freq_start, freq_end, attenuation_db, attack_ms, release_ms):
     """
