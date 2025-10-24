@@ -1,11 +1,16 @@
 ### **Dokumentacja Projektowa: Lokalny Asystent Dyktowania**
 
-**Wersja:** 1.4
-**Data:** 21.10.2025
+**Wersja:** 1.5
+**Data:** 24.10.2025
 **Autorzy Zmian:** [Ajmag], AI Architect
 
 ### Dziennik Zmian (Changelog)
 
+- **Wersja 1.5 (24.10.2025):**
+  - **Wdrożono architekturę strumieniową (Producer-Consumer)** w `main_streaming.py`, umożliwiając transkrypcję długich dyktand z niską latencją.
+  - **Zaimplementowano inteligentne cięcie audio (RMS-VAD)**, które dzieli nagranie na fragmenty w miejscach naturalnych pauz, co znacząco poprawia jakość transkrypcji.
+  - **Zaimplementowano szczegółowe logowanie** przyczyny cięcia fragmentu (`VAD_SILENCE`, `MAX_BUFFER_LIMIT`) oraz metrykę **Latencji Użytkownika** (czas od puszczenia klawisza do końca transkrypcji).
+  - **Zrefaktoryzowano kod** w `main_simple.py` i `main_streaming.py`, przenosząc logikę ładowania modelu i konfiguracji do `src/core_utils.py`.
 - **Wersja 1.4 (21.10.2025):**
   - **Rozwiązano krytyczny problem pętli powtórzeń** modelu Whisper poprzez implementację zaawansowanych, konfigurowalnych parametrów transkrypcji (`vad_filter`, `log_prob_threshold`, `no_speech_threshold`).
   - **Zrefaktoryzowano strukturę projektu:** Wprowadzono katalog `src/` dla modułów wewnętrznych, co poprawiło organizację i skalowalność kodu.
@@ -47,6 +52,7 @@ System składa się z jednego głównego komponentu – **usługi działającej 
 #### 2.1. Diagram Architektury Systemu
 
 ```
+
 +--------------------------------------------------------------------------+
 |                               System Operacyjny (Linux / X11)            |
 |                                                                          |
@@ -84,6 +90,7 @@ System składa się z jednego głównego komponentu – **usługi działającej 
 |   +------------------------------------------------------------------+   |
 |                                                                          |
 +--------------------------------------------------------------------------+
+
 ```
 
 ### 3. Faza 1: Rozwój i Strojenie Potoku Preprocessingu - Zakończone
@@ -198,25 +205,27 @@ Faza rozwoju zostaje podzielona na dwa główne etapy:
 #### 4.3. Architektura Aplikacji Docelowej
 
 ```
+
 +---------------------------------------------------------------------------------+
 | Użytkownik |
 +---------------------------------------------------------------------------------+
-       |                                      ^
-       | Interakcja (zmiana ustawień)         | Informacja o statusie
-       v                                      |
-+--------------------------------------+     +-------------------------------------+
-| Aplikacja Konfiguracyjna (GUI)       |     | Core Service (Demon systemd)        |
-| - UI (PyQt/GTK)                      |     | - Uruchamiany przy starcie systemu  |
-| - Wybór skrótu, modelu, języka       |     | - Zawiera całą logikę z POC         |
-| - Zarządzanie usługą (start/stop)    |     |   (Listener, Wątki, Transkrypcja)   |
-+--------------------------------------+     +-------------------------------------+
-       |                                      ^
-       | 1. Zapisuje zmiany                   | 2. Odczytuje konfigurację
-       |    do pliku konfiguracyjnego         |    przy starcie lub na sygnał
-       v                                      |
+| ^
+| Interakcja (zmiana ustawień) | Informacja o statusie
+v |
++--------------------------------------+ +-------------------------------------+
+| Aplikacja Konfiguracyjna (GUI) | | Core Service (Demon systemd) |
+| - UI (PyQt/GTK) | | - Uruchamiany przy starcie systemu |
+| - Wybór skrótu, modelu, języka | | - Zawiera całą logikę z POC |
+| - Zarządzanie usługą (start/stop) | | (Listener, Wątki, Transkrypcja) |
++--------------------------------------+ +-------------------------------------+
+| ^
+| 1. Zapisuje zmiany | 2. Odczytuje konfigurację
+| do pliku konfiguracyjnego | przy starcie lub na sygnał
+v |
 +---------------------------------------------------------------------------------+
 | Plik config.ini |
 +---------------------------------------------------------------------------------+
+
 ```
 
 ### 5. Analiza Wydajności na Docelowym Sprzęcie (GTX 1050 Ti) - ZAKTUALIZOWANO
@@ -232,8 +241,6 @@ Nasze testy wykazały, że dla modelu `medium` na docelowym sprzęcie, **RTF wyn
 
 **Wnioski:**
 
-- Model `medium` jest ponad dwukrotnie wolniejszy od `small`, co jest oczekiwanym kompromisem za znacznie wyższą jakość językową.
-- Całkowity czas oczekiwania użytkownika (preprocessing + transkrypcja + wklejanie) dla 30-sekundowego dyktanda wynosi około **7-8 sekund**, co jest akceptowalne dla architektury wsadowej.
 - Model `medium` zużywa ~50% VRAM karty GTX 1050 Ti, co jest w pełni bezpiecznym poziomem.
 
 ### 6. Potencjalne Kierunki Rozwoju (Roadmap)
@@ -244,3 +251,7 @@ Nasze testy wykazały, że dla modelu `medium` na docelowym sprzęcie, **RTF wyn
 - **Wsparcie dla Wayland:** Zbadanie alternatyw dla `xdotool` i `pynput`.
 - **Zaawansowane formatowanie:** Automatyczne dodawanie interpunkcji.
 - **Inteligentna edycja tekstu (Post-processing):** Możliwość wykorzystania małego, lokalnego modelu językowego (LLM) do automatycznego usuwania pomyłek i powtórzeń.
+
+```
+
+```
