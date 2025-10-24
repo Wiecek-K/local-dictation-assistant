@@ -33,8 +33,15 @@ def load_configuration():
             'log_prob_threshold': config.getfloat('advanced', 'log_prob_threshold', fallback=-1.0),
             'no_speech_threshold': config.getfloat('advanced', 'no_speech_threshold', fallback=0.6),
             'local_files_only': config.getboolean('advanced', 'local_files_only', fallback=True),
-            'streaming_vad_mode': config.get('advanced', 'streaming_vad_mode', fallback='final_chunk') # NOWA OPCJA
+            'beam_size': config.getint('advanced', 'beam_size', fallback=5),
+            'compression_ratio_threshold': config.getfloat('advanced', 'compression_ratio_threshold', fallback=3.0), # ZMIANA
+            # NOWE PARAMETRY VAD
+            'vad_max_buffer_seconds': config.getint('advanced', 'vad_max_buffer_seconds', fallback=20),
+            'vad_min_chunk_seconds': config.getint('advanced', 'vad_min_chunk_seconds', fallback=10),
+            'vad_silence_threshold_seconds': config.getfloat('advanced', 'vad_silence_threshold_seconds', fallback=1.5),
+            'vad_rms_threshold': config.getfloat('advanced', 'vad_rms_threshold', fallback=0.005)
         })
+        # USUNIĘTO: streaming_vad_mode
         app_logger.info("Konfiguracja załadowana pomyślnie.")
         return settings
     except (FileNotFoundError, configparser.Error) as e:
